@@ -4,33 +4,101 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-// Сложность алгоритма добавления в словарь O(1) в лучшем случае, O(N * log(N)) - в худшем случае
-// Сложность алгоритма поиска слов: O(sqrt (N))
-// Время: 1 час 50 минут
+// Сложность алгоритма добавления в словарь O(k), где k - длина слова
+// Сложность алгоритма поиска слов: O(k), где k - длина слова
+// Время: 2 час 20 минут
 // Обдумывание: 40 минут
 // Реализация: 30 минут
-// Тестирование: 25 минут
-// Рефакторинг: 15 минут
+// Тестирование: 35 минут
+// Рефакторинг: 35 минут
 
-// Имена хранятся в словаре, в которм ключом выступает первый символ имени, а значением - список имен.
-// Поиск прыжками: при поиске осуществляется прыжок по индексам, равный sqrt(array_length). За начальную позицию диапазона
-// принимается индекс, при котором слово будет меньше или равно заданному шаблону, а за конечную - слово, которое больше
-// шаблона и не содержит его. Далее начальная и конечная позиции корректируются, пока все слова в диапазоне не будут
-// содержать шаблон.
+// Имена хранятся в префиксном дереве, где каждая буква - узел дерева. В узлах хранится количество слов, которые
+// заканчиваются на данную букву. При добавлении инкрементируется счетчик для встретившихся символов, а так же создается
+// новый узел, если символ впервые встречается в последовательности слов. При поиске происходит проход по дереву, пока
+// не будет достигнут конец слова либо лист дерева.
 
 namespace Notebook {
+    internal class Node {
+        internal int Count => _count;
+        internal Dictionary<char, Node> Symbols;
+
+        private int _count;
+
+        /// <summary> Конструктор узла дерева </summary>
+        /// <param name="root"> Является ли узел корневым </param>
+        public Node(bool root = false) {
+            _count = 0;
+            Symbols = new Dictionary<char, Node>();
+        }
+
+        /// <summary> Добявляет слово в дерево </summary>
+        /// <param name="word"> Добавляемое слово </param>
+        /// <returns> Удалось ли добавить слово </returns>
+        internal bool Add(string word) {
+            ++_count;
+
+            if (string.IsNullOrEmpty(word)) {
+                if (Symbols.Count == 0 && _count > 1 || _count - GetCountSum() > 1) {
+                    --_count;
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (!Symbols.ContainsKey(word[0])) {
+                Symbols.Add(word[0], new Node());
+            }
+
+            var result = Symbols[word[0]].Add(word.Remove(0, 1));
+            if (!result) {
+                --_count;
+            }
+
+            return result;
+        }
+
+        /// <summary> Ищет все слова, начинающиеся на указанный шаблон </summary>
+        /// <param name="pattern"> Шаблон </param>
+        /// <returns> Количество найденных слов </returns>
+        internal int Find(string pattern) {
+            if (string.IsNullOrEmpty(pattern)) {
+                return _count;
+            }
+
+            if (!Symbols.ContainsKey(pattern[0])) {
+                return 0;
+            }
+
+            return Symbols[pattern[0]].Find(pattern.Remove(0, 1));
+        }
+
+        /// <summary> Подсчитывает количество вхождений последующих символов в слова</summary>
+        /// <returns> Сумма </returns>
+        private int GetCountSum() {
+            var summ = 0;
+
+            foreach (var symbol in Symbols) {
+                summ += symbol.Value.Count;
+            }
+
+            return summ;
+        }
+    }
+
     internal class Program {
-        private static readonly Dictionary<char, List<string>>     _notebook = new Dictionary<char, List<string>>();
-        private static readonly Dictionary<string, Action<string>> _actions  = new Dictionary<string, Action<string>>() {
-            { "add", AddName },
-            { "find", FindNames }
+        private static readonly Dictionary<string, Action<string>> _actions = new Dictionary<string, Action<string>>() {
+            {"add", AddName},
+            {"find", FindNames}
         };
+
+        private static readonly Node _notebook = new Node(true);
 
         private const string SplitPattern = @"\W+";
 
         /// <summary> Разбивает строку на слова </summary>
-        /// <param name="source">Исходная строка</param>
-        /// <returns>Возвращает список слов. Пустые элементы игнорируются.</returns>
+        /// <param name="source"> Исходная строка </param>
+        /// <returns> Возвращает список слов. Пустые элементы игнорируются </returns>
         private static List<string> ParseStringToWords(string source) {
             var parsedData = Regex.Split(source, SplitPattern).ToList();
 
@@ -45,71 +113,26 @@ namespace Notebook {
 
             return parsedData;
         }
-        
-        /// <summary>Добявляет имя в записную книгу</summary>
-        /// <param name="name">Добявляемое имя</param>
-        /// <exception cref="ArgumentException">Выбрасывается, когда имя уже существует в записной книге</exception>
-        private static void AddName(string name) {
-            var letter = name[0];
-            
-            if (!_notebook.ContainsKey(letter)) {
-                _notebook.Add(letter, new List<string>() {name});
-                return;
-            }
 
-            if (!_notebook[letter].Contains(name)) {
-                _notebook[letter].Add(name);
-                _notebook[letter].Sort();
-            }
-            else {
+        /// <summary> Добявляет имя в записную книгу </summary>
+        /// <param name="name"> Добявляемое имя </param>
+        /// <exception cref="ArgumentException"> Выбрасывается, когда имя уже существует в записной книге </exception>
+        private static void AddName(string name) {
+            if (!_notebook.Add(name)) {
                 throw new ArgumentException($"Name {name} is already exists in the notebook");
             }
         }
-        
-        /// <summary>Ищет все имена, начинающиеся на указанный шаблон, и выводит их количество</summary>
-        /// <param name="pattern">Шаблон</param>
+
+        /// <summary> Ищет все имена, начинающиеся на указанный шаблон, и выводит их количество </summary>
+        /// <param name="pattern"> Шаблон </param>
         private static void FindNames(string pattern) {
-            var names = _notebook[pattern[0]];
-            int first = 0;
-            int last = names.Count - 1;
-
-            if (pattern.Length == 1) {
-                Console.WriteLine(names.Count);
-            }
-            
-            int arrayLength = names.Count;
-            int jumpStep = (int) Math.Sqrt(arrayLength);
-            int currentPos = jumpStep;
-
-            while (Math.Min(currentPos, arrayLength) < arrayLength) {
-                var pos = Math.Min(currentPos, arrayLength) - 1;
-
-                if (names[pos].CompareTo(pattern) <= 0) {
-                    first = pos;
-                }
-                else if (!names[pos].StartsWith(pattern)) {
-                    last = pos;
-                    break;
-                }
-
-                currentPos += jumpStep;
-            }
-
-            while (!names[first].StartsWith(pattern)) {
-                ++first;
-            }
-
-            while (!names[last].StartsWith(pattern)) {
-                --last;
-            }
-
-            Console.WriteLine(last - first);
+            Console.WriteLine(_notebook.Find(pattern));
         }
 
-        /// <summary>Обрабатывает ввод пользователя и вызывает заданное действие</summary>
-        /// <exception cref="InvalidDataException">Выбрасывается, когда пользователь ничего не вводит</exception>
-        /// <exception cref="ArgumentOutOfRangeException">Выбрасывается при неправильном количестве введенных аргументов</exception>
-        /// <exception cref="InvalidOperationException">Выбрасывается при вводе несуществующего действия</exception>
+        /// <summary> Обрабатывает ввод пользователя и вызывает заданное действие </summary>
+        /// <exception cref="InvalidDataException"> Выбрасывается, когда пользователь ничего не вводит </exception>
+        /// <exception cref="ArgumentOutOfRangeException"> Выбрасывается при неправильном количестве введенных аргументов </exception>
+        /// <exception cref="InvalidOperationException"> Выбрасывается при вводе несуществующего действия </exception>
         private static void MakeAction() {
             Console.Write("Enter action: ");
             var input = Console.ReadLine();
@@ -139,7 +162,7 @@ namespace Notebook {
             AddName("jordge");
             AddName("jacob");
             AddName("andrew");
-            
+
             while (true) {
                 try {
                     MakeAction();
@@ -147,6 +170,7 @@ namespace Notebook {
                 catch (Exception err) {
                     Console.WriteLine(err);
                 }
+
                 Console.WriteLine();
             }
         }
